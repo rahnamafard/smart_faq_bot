@@ -5,8 +5,10 @@ from bot.handlers import start, handle_question
 import config
 
 # Set the environment variable to route requests through the SOCKS5 proxy
-os.environ['http_proxy'] = "socks5://127.0.0.1:1080"
-os.environ['https_proxy'] = "socks5://127.0.0.1:1080"
+# Check if the .env file exists
+if os.path.exists(".env"):
+    os.environ['http_proxy'] = "socks5://127.0.0.1:1080"
+    os.environ['https_proxy'] = "socks5://127.0.0.1:1080"
 
 def main():
     application = ApplicationBuilder().token(config.TELEGRAM_TOKEN).build()
