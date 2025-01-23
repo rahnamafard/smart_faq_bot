@@ -1,6 +1,7 @@
 import psycopg2
 import config
 import logging
+from bot.utils import get_embedding
 
 logger = logging.getLogger(__name__)
 
