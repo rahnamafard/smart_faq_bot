@@ -2,8 +2,8 @@ import logging
 from telegram import Update
 from telegram.ext import CallbackContext, ContextTypes
 from bot.knowledge_base import add_knowledge, remove_knowledge, get_knowledge_base, query_gemini_llm, get_answer
-from bot.feedback import log_question_and_feedback
 import config
+from bot.database import remove_all_knowledge  # Ensure this is correct
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -32,11 +32,18 @@ async def handle_user_question(update: Update, context: ContextTypes.DEFAULT_TYP
     answer = get_answer(question)
     
     if answer:
-        await update.message.reply_text(answer)
+        try:
+            # Use the Gemini API for humanizing the answer
+            humanized_answer = query_gemini_llm(answer)  # Attempt to humanize the answer
+            await update.message.reply_text(humanized_answer)
+        except Exception as e:
+            logger.error("Error during humanization: %s", e)
+            # If an error occurs, return the original answer
+            await update.message.reply_text(answer)
     else:
         # If not found, query the Gemini API for help
         answer = query_gemini_llm(question)  # Use Gemini API for the answer
-        await update.message.reply_text("I couldn't find an exact match, but here's some help: " + answer)
+        await update.message.reply_text("I couldn't find an exact match. Please ask me another queestion.")
 
 async def handle_admin_commands(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     command = update.message.text
@@ -47,7 +54,9 @@ async def handle_admin_commands(update: Update, context: ContextTypes.DEFAULT_TY
         if command == "/view_kb":
             logger.info("Fetching knowledge base for admin: %s", update.message.from_user.id)
             knowledge_base = get_knowledge_base()
-            await update.message.reply_text("\n".join(knowledge_base))
+            # Format the knowledge base entries into strings
+            formatted_kb = [f"Q: {q}\nA: {a}" for q, a in knowledge_base]  # Create a list of formatted strings
+            await update.message.reply_text("\n\n".join(formatted_kb))  # Join with double newlines for better readability
         elif command.startswith("/add_kb"):
             # Expecting the format: /add_kb question - answer
             try:
@@ -67,5 +76,9 @@ async def handle_admin_commands(update: Update, context: ContextTypes.DEFAULT_TY
             else:
                 logger.warning("Entry not found for removal: %s", entry_to_remove)
                 await update.message.reply_text("Entry not found.")
+        elif command == "/reset_kb":  # New command to reset the knowledge base
+            logger.info("Resetting knowledge base for admin: %s", update.message.from_user.id)
+            remove_all_knowledge()  # Call the function to clear the knowledge base
+            await update.message.reply_text("Knowledge base has been reset and cleared.")
     else:
         logger.warning("Received non-command input from admin: %s", command)

@@ -25,11 +25,12 @@ def insert_log(user_id: int, question: str, answer: str, feedback: int = None) -
     conn.close()
 
 def insert_knowledge(question: str, answer: str) -> None:
+    embedding = get_embedding(question)  # Calculate the embedding for the question
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO knowledge_base (question, answer) VALUES (%s, %s)",
-        (question, answer)
+        "INSERT INTO knowledge_base (question, answer, embedding) VALUES (%s, %s, %s)",
+        (question, answer, embedding.tolist())  # Convert numpy array to list for storage
     )
     conn.commit()
     cursor.close()
@@ -57,3 +58,12 @@ def get_all_knowledge() -> list:
     cursor.close()
     conn.close()
     return rows
+
+def remove_all_knowledge() -> None:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM knowledge_base")  # Delete all entries
+    conn.commit()  # Commit the changes
+    cursor.close()
+    conn.close()
+    logger.info("All entries in the knowledge base have been deleted.")

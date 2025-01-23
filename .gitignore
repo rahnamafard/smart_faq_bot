@@ -1,2 +1,4 @@
-telegram_bot_env
+newenv
 .env
+bot/__pycache__/
+__pycache__

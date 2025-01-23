@@ -1,10 +1,10 @@
 import requests
 import logging
 import numpy as np
-import torch
 from transformers import AutoTokenizer, AutoModel
-from bot.database import insert_knowledge, remove_knowledge, get_all_knowledge
+from bot.database import insert_knowledge, remove_knowledge, get_all_knowledge, get_connection
 from sklearn.metrics.pairwise import cosine_similarity
+from bot.utils import get_embedding
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO)
@@ -27,17 +27,9 @@ def get_knowledge_base() -> list:
     knowledge_entries = get_all_knowledge()
     return [(q, a) for q, a in knowledge_entries]
 
-def get_embedding(text: str) -> np.ndarray:
-    """Get embeddings for the given text using the BERT model."""
-    inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True)
-    with torch.no_grad():
-        outputs = model(**inputs)
-    embedding = outputs.last_hidden_state.mean(dim=1)  # Average pooling
-    return embedding.squeeze().numpy()
-
 def query_gemini_llm(answer: str) -> str:
     """Query the Gemini API to rewrite the provided answer."""
-    prompt = f"Please rewrite the following response in a more humanized way but having the exact same meaning and return just 1 exactly trimmed rewrited sentence in persian: '{answer}'"
+    prompt = f"Please rewrite the following response in a more humanized way but having the exact same meaning and return just 1 exactly trimmed rewrited sentence in english: '{answer}'"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key={GEMINI_API_KEY}"
     headers = {"Content-Type": "application/json"}
     data = {
@@ -51,41 +43,61 @@ def query_gemini_llm(answer: str) -> str:
     logger.info("Gemini API response: %s", response.text)
     
     if response.status_code == 200:
-        return response.json().get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "خطایی هنگام آماده کردن پاسخ رخ داد.")
+        return response.json().get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "An error occured in preparing answer.")
     else:
         logger.error("Error from Gemini API: %s", response.text)
-        return "خطایی هنگام دریافت پاسخ از سرویس خارجی رخ داد"
+        return answer
+
+def insert_knowledge(question: str, answer: str) -> None:
+    # Concatenate question and answer for embedding
+    combined_text = f"{question} {answer}"  # Combine question and answer
+    embedding = get_embedding(combined_text)  # Calculate the embedding for the combined text
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO knowledge_base (question, answer, embedding) VALUES (%s, %s, %s)",
+        (question, answer, embedding.tolist())  # Store the embedding in the database
+    )
+    conn.commit()
+    cursor.close()
+    conn.close()
 
 def get_answer(question: str) -> str:
-    """Get the best answer for the user's question from the knowledge base."""
-    knowledge_entries = get_knowledge_base()
-    questions = [q for q, _ in knowledge_entries]  # Extract only the questions
-
-    # Get embeddings for the user's question
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # Get the embedding for the user's question
     question_embedding = get_embedding(question)
+    
+    # Check for NaN values in the question embedding
+    if np.isnan(question_embedding).any():
+        logger.error("Question embedding contains NaN values.")
+        return None  # Or handle this case as needed
 
-    # Get embeddings for all knowledge base questions
-    knowledge_embeddings = [get_embedding(q) for q in questions]
-
-    # Filter out None values from embeddings
-    knowledge_embeddings = [emb for emb in knowledge_embeddings if emb is not None]
-
-    # Calculate cosine similarity
-    if question_embedding is not None and len(knowledge_embeddings) > 0:
-        similarities = cosine_similarity(question_embedding.reshape(1, -1), np.array(knowledge_embeddings))
-
-        # Find the index of the most similar question
-        best_match_index = np.argmax(similarities)
-
-        # Check if the similarity is above a certain threshold (e.g., 0.7)
-        if similarities[0][best_match_index] > 0.7:
-            best_match_question = questions[best_match_index]
-            # Retrieve the corresponding answer from the knowledge base
-            for kq, ka in knowledge_entries:
-                if kq == best_match_question:  # Exact match
-                    # Use the Gemini API to humanize the answer
-                    humanized_answer = query_gemini_llm(ka)
-                    return humanized_answer
-
-    # If no good match is found, return a fallback response
-    return "متاسفانه من پاسخ سوال شما را نمی‌دانم."
+    # Fetch all knowledge base entries
+    cursor.execute("SELECT question, answer, embedding FROM knowledge_base")
+    rows = cursor.fetchall()
+    
+    best_match = None
+    best_similarity = -1
+    
+    for row in rows:
+        kb_question, answer, embedding = row
+        
+        # Convert the stored embedding from the database to a numpy array
+        embedding = np.array(embedding, dtype=float)  # Ensure the embedding is a float array
+        
+        # Calculate cosine similarity between the user's question embedding and the stored embedding
+        similarity = cosine_similarity(question_embedding.reshape(1, -1), embedding.reshape(1, -1))[0][0]
+        
+        logger.info("Comparing with KB question: '%s' | Similarity: %f", kb_question, similarity)  # Debugging info
+        
+        if similarity > best_similarity:
+            best_similarity = similarity
+            best_match = answer
+    
+    cursor.close()
+    conn.close()
+    
+    logger.info("Best match similarity: %f", best_similarity)  # Debugging info
+    return best_match if best_similarity > 0.3 else None  # Return answer if similarity is above threshold
