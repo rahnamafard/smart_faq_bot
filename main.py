@@ -21,8 +21,6 @@ if os.path.exists(".env"):
     os.environ['https_proxy'] = "socks5://127.0.0.1:1080"
 
 def main():
-    print(f"Loaded TELEGRAM_TOKEN: {TELEGRAM_TOKEN}")
-    
     application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     
     application.add_handler(CommandHandler("start", start))

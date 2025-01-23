@@ -31,9 +31,30 @@ async def handle_question(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await handle_user_question(update, context)
 
 async def handle_user_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.message.from_user.id
     question = update.message.text
     logger.info("User asked: %s", question)
     
+    # Check if the message is a command
+    if question.startswith("/"):
+        await handle_admin_commands(update, context)
+        return  # Exit to avoid processing as a regular question
+
+    # Check if the user is providing feedback
+    if 'last_question' in context.user_data and context.user_data['user_id'] == user_id:
+        try:
+            feedback = int(question)  # Convert the input to an integer
+            if 1 <= feedback <= 5:  # Check if feedback is within the valid range
+                # Save feedback to the database with the actual answer
+                insert_feedback(user_id, context.user_data['last_question'], context.user_data['last_answer'], feedback)  # Use the actual answer
+                await update.message.reply_text("Thank you for your feedback!")
+                del context.user_data['last_question']  # Clear the stored question
+                del context.user_data['user_id']  # Clear the stored user ID
+                del context.user_data['last_answer']  # Clear the stored answer
+                return
+        except ValueError:
+            await update.message.reply_text("Please provide a valid rating between 1 and 5.")
+
     # Get the answer from the knowledge base
     answer = get_answer(question)
     
@@ -43,15 +64,14 @@ async def handle_user_question(update: Update, context: ContextTypes.DEFAULT_TYP
             humanized_answer = query_gemini_llm(answer)  # Attempt to humanize the answer
             await update.message.reply_text(humanized_answer)
 
-            # Ask for feedback only if the user is not an admin
-            user_id = update.message.from_user.id
-            if str(user_id) not in config.ADMIN_USER_IDS:
-                await update.message.reply_text("Please rate the answer from 1 to 5 stars (1 being the worst and 5 being the best).")
-                context.user_data['last_question'] = question  # Store the question for feedback
-                context.user_data['user_id'] = user_id  # Store user ID for feedback
+            # Store the actual answer for feedback
+            context.user_data['last_answer'] = humanized_answer  # Store the actual answer
+            # Ask for feedback
+            await update.message.reply_text("Please rate the answer from 1 to 5 stars (1 being the worst and 5 being the best).")
+            context.user_data['last_question'] = question  # Store the question for feedback
+            context.user_data['user_id'] = user_id  # Store user ID for feedback
         except Exception as e:
             logger.error("Error during humanization: %s", e)
-            # If an error occurs, return the original answer
             await update.message.reply_text(answer)
     else:
         # If not found, query the Gemini API for help

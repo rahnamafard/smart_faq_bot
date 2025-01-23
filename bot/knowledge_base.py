@@ -29,7 +29,7 @@ def get_knowledge_base() -> list:
 
 def query_gemini_llm(answer: str) -> str:
     """Query the Gemini API to rewrite the provided answer."""
-    prompt = f"Please rewrite the following response in a more humanized way but having the exact same meaning and return just 1 exactly trimmed rewrited sentence in english: '{answer}'"
+    prompt = f"Please rewrite the following response in a more humanized way but having the exact same meaning and return just 1 exactly trimmed rewrited sentence: '{answer}'"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key={GEMINI_API_KEY}"
     headers = {"Content-Type": "application/json"}
     data = {
