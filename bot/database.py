@@ -14,12 +14,12 @@ def get_connection():
         port=config.DB_PORT
     )
 
-def insert_log(user_id: int, question: str, answer: str, feedback: int = None) -> None:
+def insert_log(user_id: int, question: str, answer: str) -> None:
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO logs (user_id, question, answer, feedback) VALUES (%s, %s, %s, %s)",
-        (user_id, question, answer, feedback)
+        "INSERT INTO logs (user_id, question, answer) VALUES (%s, %s, %s)",
+        (user_id, question, answer)
     )
     conn.commit()
     cursor.close()
@@ -63,8 +63,20 @@ def get_all_knowledge() -> list:
 def remove_all_knowledge() -> None:
     conn = get_connection()
     cursor = conn.cursor()
+    logger.info("Attempting to delete all entries from knowledge_base.")
     cursor.execute("DELETE FROM knowledge_base")  # Delete all entries
     conn.commit()  # Commit the changes
+    logger.info("All entries in the knowledge base have been deleted.")
     cursor.close()
     conn.close()
-    logger.info("All entries in the knowledge base have been deleted.")
+
+def insert_feedback(user_id: int, question: str, answer: str, feedback: int) -> None:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO user_feedback (user_id, question, answer, feedback) VALUES (%s, %s, %s, %s)",
+        (user_id, question, answer, feedback)
+    )
+    conn.commit()
+    cursor.close()
+    conn.close()

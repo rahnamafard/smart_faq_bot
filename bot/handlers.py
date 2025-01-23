@@ -2,8 +2,8 @@ import logging
 from telegram import Update
 from telegram.ext import CallbackContext, ContextTypes
 from bot.knowledge_base import add_knowledge, remove_knowledge, get_knowledge_base, query_gemini_llm, get_answer
+from bot.database import remove_all_knowledge, insert_feedback  # Ensure this is correct
 import config
-from bot.database import remove_all_knowledge  # Ensure this is correct
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -15,8 +15,14 @@ async def start(update: Update, context: CallbackContext) -> None:
 
 async def handle_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.message.from_user.id
-    logger.info("Received question from user: %s", user_id)
+    question = update.message.text
+    logger.info("User asked: %s", question)
     
+    # Check if the message is a command
+    if question.startswith("/"):
+        await handle_admin_commands(update, context)
+        return  # Exit to avoid processing as a regular question
+
     if str(user_id) in config.ADMIN_USER_IDS:
         logger.info("User %s is an admin.", user_id)
         await handle_admin_commands(update, context)
@@ -36,6 +42,13 @@ async def handle_user_question(update: Update, context: ContextTypes.DEFAULT_TYP
             # Use the Gemini API for humanizing the answer
             humanized_answer = query_gemini_llm(answer)  # Attempt to humanize the answer
             await update.message.reply_text(humanized_answer)
+
+            # Ask for feedback only if the user is not an admin
+            user_id = update.message.from_user.id
+            if str(user_id) not in config.ADMIN_USER_IDS:
+                await update.message.reply_text("Please rate the answer from 1 to 5 stars (1 being the worst and 5 being the best).")
+                context.user_data['last_question'] = question  # Store the question for feedback
+                context.user_data['user_id'] = user_id  # Store user ID for feedback
         except Exception as e:
             logger.error("Error during humanization: %s", e)
             # If an error occurs, return the original answer
@@ -43,7 +56,7 @@ async def handle_user_question(update: Update, context: ContextTypes.DEFAULT_TYP
     else:
         # If not found, query the Gemini API for help
         answer = query_gemini_llm(question)  # Use Gemini API for the answer
-        await update.message.reply_text("I couldn't find an exact match. Please ask me another queestion.")
+        await update.message.reply_text("I couldn't find an exact match. Please ask me another question.")
 
 async def handle_admin_commands(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     command = update.message.text
@@ -76,9 +89,21 @@ async def handle_admin_commands(update: Update, context: ContextTypes.DEFAULT_TY
             else:
                 logger.warning("Entry not found for removal: %s", entry_to_remove)
                 await update.message.reply_text("Entry not found.")
-        elif command == "/reset_kb":  # New command to reset the knowledge base
-            logger.info("Resetting knowledge base for admin: %s", update.message.from_user.id)
+        elif command == "/shuffle_database":  # Ensure the command matches
+            logger.info("Shuffling knowledge base for admin: %s", update.message.from_user.id)
             remove_all_knowledge()  # Call the function to clear the knowledge base
-            await update.message.reply_text("Knowledge base has been reset and cleared.")
+            await update.message.reply_text("Knowledge base has been cleared.")
+        # Add other admin commands here
     else:
         logger.warning("Received non-command input from admin: %s", command)
+
+async def receive_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    feedback = int(update.message.text)
+    user_id = context.user_data.get('user_id')
+    question = context.user_data.get('last_question')
+    answer = "Your answer here"  # Replace with actual answer logic
+
+    # Insert feedback into the database
+    insert_feedback(user_id, question, answer, feedback)
+
+    await update.message.reply_text("Thank you for your feedback!")
